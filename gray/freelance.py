@@ -1,14 +1,14 @@
 import os
 
 import upwork
-# from gray.common.pprinter import print_json
 from gray.common.data_utils import first_match, write_entries
+from gray.common.node_utils import Document
 
 
 def get_new_token():
     client = upwork.Client(os.environ["upkey"], os.environ["upsecret"])
     authorize_url = client.auth.get_authorize_url()
-    from gray.common.selenium_utils import Document
+    from gray.common.node_utils import Document
     doc = Document(headless=True)
     print("Navigating authorize url...")
     doc.navigate(authorize_url)
@@ -27,8 +27,13 @@ def get_new_token():
     return oauth_token, oauth_token_secret
 
 
-# print_json(client.auth.get_info())
-client = upwork.Client(os.environ["upkey"], os.environ["upsecret"], os.getenv("uptoken"), os.getenv("uptokensecret"))
-jobs_list_dict = client.provider_v2.search_jobs({'q': 'python'})
+def get_job_list():
+    doc = Document()
+
+# client = upwork.Client(os.environ["upkey"], os.environ["upsecret"], os.getenv("uptoken"), os.getenv("uptokensecret"))
+# jobs_list_dict = client.provider_v2.search_jobs(data={'skills': ["mining", "scraping", " crawler", " scrapy"],
+#
+jobs_list_dict = get_job_list()
 write_entries(jobs_list_dict, "jobs.csv")
+
 print("end")

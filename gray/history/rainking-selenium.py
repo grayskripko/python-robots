@@ -2,7 +2,7 @@ import os
 import re
 import time
 from selenium.common.exceptions import TimeoutException
-from gray.common.selenium_utils import Document
+from gray.common.node_utils import Document
 
 
 # script for collection html pages only
