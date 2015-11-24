@@ -2,6 +2,7 @@ import pandas as pd
 import os
 import re
 import sys
+import smtplib
 
 
 def first_match(pattern, string, safe=True, strip=True):
@@ -90,3 +91,20 @@ def write_entries(dict_list, file_name):
     # if len(dict_list) != len(dict_list_wo_duplicates):
     #     print("\ncount of duplicates: " + str(len(dict_list) - len(dict_list_wo_duplicates)))
     #     __write_entries__(dict_list_wo_duplicates, "no_duplicates_" + file_name, col_names)
+
+
+def send_email(body, subject="Upwork monitor", recipient="grayskripko@gmail.com"):
+    gmail_user = "grayskripko@gmail.com"
+    gmail_pwd = os.getenv("up") + "#g"
+    TO = recipient if type(recipient) is list else [recipient]
+    message = """\From: %s\nTo: %s\nSubject: %s\n\n%s""" % ("grayskripko@gmail.com", ", ".join(TO), subject, body)
+
+    try:
+        server = smtplib.SMTP("smtp.gmail.com", 587)
+        server.ehlo()
+        server.starttls()
+        server.login(gmail_user, gmail_pwd)
+        server.sendmail("grayskripko@gmail.com", TO, message)
+        server.close()
+    except:
+        print("failed to send mail")
