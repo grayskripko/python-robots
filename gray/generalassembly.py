@@ -1,6 +1,6 @@
 import time
 
-from gray.common.data_utils import write_entries
+from gray.common.data_utils import write_entries, time_measure
 from gray.common.node_utils import Node, Provider
 
 doc = Node("https://generalassemb.ly/education", Provider.PHANTOMJS)
@@ -17,11 +17,11 @@ for row_idx, row_el in enumerate(row_els):
     entry["instructor"] = details_el.select(".instructor").text()
 
     entry["series"] = row_el.select(".series-info").text()
-    entry["date"] = row_el.select(".date-details:first-child").text()
-    entry["time"] = row_el.select(".date-details:last-child").text()
+    entry["date"] = row_el.select(".date-details").text()
+    entry["time"] = row_el.select(".date-details").text()
     entry["topics"] = row_el.select_list("li.topic-icon-item").attrs("title")
     entry["promo"] = row_el.select_list(".cyber-monday-promo").texts()
-    print(row_idx, time.time() - start_time)
+    time_measure(str(row_idx) + " row", start_time, 3)
     entries.append(entry)
 
 write_entries(entries, "generalassembly")

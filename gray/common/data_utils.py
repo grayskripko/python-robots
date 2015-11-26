@@ -4,6 +4,8 @@ import re
 import sys
 import smtplib
 
+import time
+
 
 def first_match(pattern, string, safe=True, strip=True):
     try:
@@ -51,15 +53,18 @@ def inline_print(string, sep=" "):
 #         dict_writer.writerows(dict_list)
 
 
-def write_entries(dict_list, file_name):
+def write_entries(dict_list, file_name, id_column=None):
     if not dict_list:
         print("Empty dict_list")
         return
     dict_list = [{k: re.sub("(\r?\n)+", "|| ", str(v)) for k, v in dict.items()} for dict in dict_list]
-    df = pd.DataFrame(dict_list, )
-    df.index = df["id"]
-    df.to_csv(os.getenv("OUT") + file_name)
-    df.to_excel(os.getenv("OUT") + re.sub("\.csv", ".xlsx", file_name))
+    df = pd.DataFrame(dict_list)
+    if id_column:
+        df.index = df[id_column]
+
+    full_file_name = os.getenv("OUT") + file_name + ("" if "." in file_name else ".csv")
+    df.to_csv(full_file_name)
+    df.to_excel(re.sub("\.csv", ".xlsx", full_file_name))
     # predicted_df = pd.DataFrame(Y_pred, index=np.arange(1, X_pred.shape[0] + 1), columns=["too_much"])
     # predicted_df.to_csv(_data_path + file_name, index_label="id")
 
@@ -108,3 +113,8 @@ def send_email(body, subject="Upwork monitor", recipient="grayskripko@gmail.com"
         server.close()
     except:
         print("failed to send mail")
+
+
+def time_measure(msg, start_time, precision=0):
+    duration = str(round(time.time() - start_time, precision)) if precision else str(round(time.time() - start_time))
+    print("{0}: [{1}] sec".format(msg, duration))

@@ -30,8 +30,8 @@ def process_filter_section(doc, url):
     print("Filter section [{0}]".format(filter_name))
 
     while True:
-        pagination_root = doc.select(".pagination > ul", need_wait=True)
-        cur_page_idx = doc.select("li.active", pagination_root, need_wait=True)
+        pagination_root = doc.select(".pagination > ul")
+        cur_page_idx = doc.select("li.active", pagination_root)
         cur_page_idx = cur_page_idx.text if cur_page_idx else ""
         print("Page [{0}]".format(cur_page_idx))
         doc.page_save_as(category_name + "_" + filter_name + "_" + str(cur_page_idx))

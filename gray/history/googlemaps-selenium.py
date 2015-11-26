@@ -15,10 +15,10 @@ queries = queries_str.split("\n")
 
 url = "https://www.google.com/#q=california+supermarket+Petco"
 doc.navigate(url)  # print(driver.title)
-doc.select("#_L8b > div > a:nth-child(3)", need_wait=True).click()  # english
-doc.select("#rso div._m3g > a", need_wait=True).click()  # more
+doc.select("#_L8b > div > a:nth-child(3)").click()  # english
+doc.select("#rso div._m3g > a").click()  # more
 items_css = '.rl_full-list .rlfl__tls.rl_tls > div'
-doc.select(items_css, need_wait=True)
+doc.select(items_css)
 
 for query in queries:
     inline_print("\n" + query)
@@ -27,18 +27,18 @@ for query in queries:
     search_box.send_keys("california supermarket \"{0}\"".format(query))
     search_box.send_keys(Keys.RETURN)
 
-    checker = doc.select("#rso > div[jsl] + div", need_wait=True)  # map and search results
+    checker = doc.select("#rso > div[jsl] + div")  # map and search results
     if not checker:
         inline_print("empty")
         continue
-    doc.select("#lu_map", need_wait=True).click()  # click map
+    doc.select("#lu_map").click()  # click map
 
     while True:
         page_items = doc.select_list(items_css, need_wait=True)
         inline_print(len(page_items))
         for page_item in page_items:
-            lat_str = doc.select("div[data-lat]", page_item, attr="data-lat")  # div.rllt__mi
-            lng_str = doc.select("div[data-lng]", page_item, attr="data-lng")
+            lat_str = doc.select("div[data-lat]", page_item)  # div.rllt__mi
+            lng_str = doc.select("div[data-lng]", page_item)
             address_el = doc.select("._gt > a[data-akp-oq]", page_item)
             if address_el is not None:
                 city_mess_el = address_el.get_attribute('data-akp-oq')
@@ -57,7 +57,7 @@ for query in queries:
                      "lng": parse_float(lng_str, 6)}
             entries.append(entry)
 
-        next_page = doc.select("#pnnext", captcha_occurs=False)  # table#nav tr > td.cur + td > a
+        next_page = doc.select("#pnnext")  # table#nav tr > td.cur + td > a
         if next_page is None:
             break
         next_page.click()

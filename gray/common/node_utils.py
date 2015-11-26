@@ -1,5 +1,6 @@
-from abc import ABCMeta, abstractmethod
-import bs4
+# from abc import ABCMeta, abstractmethod
+from lxml.cssselect import CSSSelector
+from lxml.html import fromstring
 import requests
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -7,8 +8,7 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium import webdriver
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.common.exceptions import *
-
-from gray.common.data_utils import clear_text
+from gray.common.data_utils import clear_text, time_measure
 from gray.rear.keaboard_emulation import *
 
 
@@ -27,58 +27,97 @@ class Node:
             return
 
         if node_source_type == "url":
+            start_time = time.time()
             if provider_type == Provider.REQUESTS:
-                self.provider = Requests(page_load_timeout)
+                self.timeout = page_load_timeout
             else:
-                self.provider = Browser(provider_type, page_load_timeout, ajax_timeout)
-            self.provider_navigate(el_source)
+                self.browser = Browser(provider_type, page_load_timeout, ajax_timeout)
+            self.navigate(el_source)
+            time_measure("First page time", start_time)
         elif node_source_type == "file":
-            self.el = bs4.BeautifulSoup(open(el_source, encoding="utf-8"))
+            self.el = fromstring(open(el_source, encoding="utf-8"))
         else:
             raise ValueError("node_source_type not in ['node', 'url', 'file']")
 
-    def provider_navigate(self, url):
-        self.el = self.provider.navigate(url)
+    def navigate(self, url, waited_el_css=None):
+        if self.browser:
+            self.browser.navigate(url, waited_el_css)
+            self.el = fromstring(self.browser.driver.page_source)
+        else:
+            for attempts in range(5, 0, -1):
+                try:
+                    response = requests.get(url, timeout=self.timeout)
+                    self.el = fromstring(response.text)
+                except Exception as e:
+                    print("Bad navigation attempt", e)
+                    time.sleep(self.timeout << 1)
         return self.__create_node__(self.el)
 
-    def provider_save_as(self, file_name=None, delay_before_win_enter=2):
-        self.provider.save_as(file_name, delay_before_win_enter)
+    def wait(self, css_of_waited):
+        self.browser.wait(css_of_waited)
 
-    def provider_shutdown(self):
-        self.provider.shutdown()
+    def save_as(self, file_name=None, delay_before_win_enter=2):
+        self.browser.save_as(file_name, delay_before_win_enter)
+
+    def shutdown(self):
+        self.browser.shutdown()
         self.el = None
 
-    def select_list(self, css_query, need_wait=False, captcha_occurs=True):
-        if not self.el:
+    def select_list(self, css_query, dynamic=False):
+        if self.el is None:
             return NodeList(self.__create_node__(None))
-        return NodeList(map(lambda el: self.__create_node__(el),
-                        self.provider.select_list(self.el, css_query, need_wait, captcha_occurs)))
+        if dynamic:
+            result_els = __safe_execution__(self.el.find_elements_by_css_selector, css_query)
+        else:
+            selector = CSSSelector(css_query)
+            result_els = __safe_execution__(selector, self.el)
+        return NodeList(map(lambda el: self.__create_node__(el), result_els))
 
-    def select(self, css_path, need_wait=False, captcha_occurs=True):
-        return self.__create_node__(self.provider.select(self.el, css_path, need_wait, captcha_occurs)) \
-            if self.el else self.__create_node__(None)
+    def select(self, query, dynamic=False, is_browser_css_query=True):
+        # "{0}:contains('{1}')" "//{0}[contains(., '{1}')]"
+        if self.el is None:
+            return self.__create_node__(None)
+        if dynamic:
+            by = By.CSS_SELECTOR if is_browser_css_query else By.XPATH
+            result_el = __safe_execution__(self.el.find_element, by, query)
+        else:
+            selector = CSSSelector(query)
+            result_els = __safe_execution__(selector, self.el)  # check for None
+            result_el = result_els[0] if result_els else None
+        return self.__create_node__(result_el)
 
-    def select_by_tag_text(self, tag, el_text, need_wait=False, captcha_occurs=True):
-        return self.__create_node__(self.provider.select_by_tag_text(self.el, tag, el_text, need_wait, captcha_occurs)) \
-            if self.el else self.__create_node__(None)
-
-    def children(self, idx=None):
-        if not self.el:
+    def children(self, idx=None, dynamic=False):
+        if self.el is None:
             return self.__create_node__(None) if idx else NodeList(self.__create_node__(None))
-        children_els = self.provider.children(self.el)
+        if dynamic:
+            children_els = self.el.find_elements_by_xpath("*")
+        else:
+            children_els = self.el.getchildren()
+        if not children_els:
+            return self.__create_node__(None)
         if idx:
             return self.__create_node__(children_els[idx]) if idx < len(children_els) else self.__create_node__(None)
         return NodeList(map(lambda el: self.__create_node__(el), children_els))
 
-    def text(self, safe=True):
-        return self.provider.text(self.el, safe)
+    def text(self, safe=True, dynamic=False):
+        if safe and self.el is None:
+            return ""
+        if dynamic:
+            return self.el.text
+        dirty_text = self.el.text
+        return clear_text(dirty_text)
 
-    def attr(self, attr_name, safe=True):
-        return self.provider.attr(self.el, attr_name, safe)
+    def attr(self, attr_name, safe=True, dynamic=False):
+        if safe and self.el is None:
+            return ""
+        if dynamic:
+            return self.el.get_attribute(attr_name)
+        return self.el.get(attr_name)
 
     def __create_node__(self, el):
         result_node = Node(el)
-        result_node.provider = self.provider
+        if self.browser:
+            result_node.browser = self.browser
         return result_node
 
     def __nonzero__(self):
@@ -94,81 +133,14 @@ class NodeList(list):
         result = list(map(lambda node: node.attr(attr_name), self))
         return " | ".join(result) if one_line else result
 
-
-class AbstractDocumentProvider(object):
-    __metaclass__ = ABCMeta
-
-    @abstractmethod
-    def navigate(self, url): pass
-
-    @abstractmethod
-    def save_as(self, file_name=None, delay_before_win_enter=2): pass
-
-    @abstractmethod
-    def shutdown(self): pass
-
-    @abstractmethod
-    def select_list(self, el, css_query, need_wait=False, captcha_occurs=True): pass
-
-    @abstractmethod
-    def select(self, el, css_query, need_wait=False, captcha_occurs=True): pass
-
-    @abstractmethod
-    def select_by_tag_text(self, el, tag, el_text, need_wait=False, captcha_occurs=True): pass
-
-    @abstractmethod
-    def children(self, el): pass
-
-    @abstractmethod
-    def text(self, el, safe=True): pass
-
-    @abstractmethod
-    def attr(self, el, attr_name, safe=True): pass
+    def __getitem__(self, key):
+        try:
+            return list.__getitem__(self, key)
+        except Exception:
+            return None
 
 
-class Requests(AbstractDocumentProvider):
-    def __init__(self, timeout=20):
-        self.timeout = timeout
-
-    def navigate(self, url):
-        for attempts in range(5, 0, -1):
-            try:
-                response = requests.get(url, timeout=self.timeout)
-                return bs4.BeautifulSoup(response.text)
-            except Exception as e:
-                print("Bad navigation attempt", e)
-                time.sleep(self.timeout << 1)
-
-    def save_as(self, file_name=None, delay_before_win_enter=2):
-        raise ValueError("Not applicable for Requests")
-
-    def shutdown(self):
-        raise ValueError("Not applicable for Requests")
-
-    def select_list(self, el, css_query, need_wait=False, captcha_occurs=True):
-        return el.select(css_query)
-
-    def select(self, el, css_query, need_wait=False, captcha_occurs=True):
-        results = self.select_list(el, css_query)
-        return results[0] if results else None
-
-    def select_by_tag_text(self, el, tag, el_text, need_wait=False, captcha_occurs=True):
-        return self.select(el, "{0}:contains('{1}')".format(tag, el_text))
-
-    def children(self, el):
-        return el.findChildren()
-
-    def text(self, el, safe=True):
-        if safe and not el:
-            return ""
-        el_text = el.get_text()
-        return clear_text(el_text)
-
-    def attr(self, el, attr_name, safe=True):
-        return el.attrs.get(attr_name) if el or not safe else None
-
-
-class Browser(AbstractDocumentProvider):
+class Browser:
     def __init__(self, provider_type, page_load_timeout, ajax_timeout):
         if provider_type == Provider.CHROME:
             options = webdriver.ChromeOptions()
@@ -183,18 +155,28 @@ class Browser(AbstractDocumentProvider):
             raise ValueError("browser type must be in ['chrome', 'phantomjs']")
         self.driver.set_page_load_timeout(page_load_timeout)
         self.waiter = WebDriverWait(self.driver, ajax_timeout)
-        self._last_el = None
-        self._list_last_el = None
 
-    def navigate(self, url):
+    def navigate(self, url, css_of_waited=None):
         for attempts in range(5, 0, -1):
             try:
                 self.driver.get(url)
+                if css_of_waited:
+                    self.waiter.until(lambda x: self.driver.find_element_by_css_selector(css_of_waited))
                 print(url)
-                return self.driver
+                return
+                # return self.driver
             except Exception as e:
                 print("Bad navigation attempt", e)
                 time.sleep(30)
+                # if captcha_occurs: return self.__common_select__(el, query, select_type, need_wait, captcha_occurs=False)
+
+    def wait(self, css_of_waited):
+        self.waiter.until(lambda x: self.driver.find_elements_by_css_selector(css_of_waited))
+        # if need_wait:
+        #     self.waiter.until(lambda x: el.find_elements(by, query) and
+        #                             el.find_element(by, query) != self._last_el)
+        #     self.waiter.until(lambda x: el.find_elements_by_css_selector(query) and
+        #                             el.find_elements_by_css_selector(query)[-1] != self._list_last_el)
 
     def save_as(self, file_name=None, delay_before_win_enter=2):
         save_as_dialog = ActionChains(self.driver).key_down(Keys.CONTROL).send_keys('s').key_up(Keys.CONTROL)
@@ -208,53 +190,14 @@ class Browser(AbstractDocumentProvider):
     def shutdown(self):
         self.driver.quit()
 
-    def __common_select__(self, el, query, select_type, need_wait=False, captcha_occurs=True):
-        """
-        :param select_type: ['select_list', 'select', 'select_xpath']
-        """
-        try:
-            if select_type == "select_list":
-                if need_wait:
-                    self.waiter.until(lambda x: el.find_elements_by_css_selector(query) and
-                                            el.find_elements_by_css_selector(query)[-1] != self._list_last_el)
-                result = el.find_elements_by_css_selector(query)
-                self._list_last_el = result[-1] if need_wait else self._list_last_el
-            elif select_type in ["select", "xpath"]:
-                by = By.CSS_SELECTOR if select_type == "select" else By.XPATH
-                if need_wait:
-                    self.waiter.until(lambda x: el.find_elements(by, query) and
-                                            el.find_element(by, query) != self._last_el)
-                result = el.find_element(by, query)
-                self._last_el = result if need_wait else self._last_el
-            else:
-                raise ValueError("select_type not in ['select_list', 'select', 'xpath']")
-            return result
-        except (TimeoutException, NoSuchElementException):
-            if captcha_occurs:
-                return self.__common_select__(el, query, select_type, need_wait, captcha_occurs=False)
-            else:
-                return None
-        except Exception as e:
-            raise e
 
-    def select_list(self, el, css_query, need_wait=False, captcha_occurs=True):
-        return self.__common_select__(el, css_query, "select_list", need_wait, captcha_occurs)
-
-    def select(self, el, css_query, need_wait=False, captcha_occurs=True):
-        return self.__common_select__(el, css_query, "select", need_wait, captcha_occurs)
-
-    def select_by_tag_text(self, el, tag, el_text, need_wait=False, captcha_occurs=True):
-        xpath_query = "//{0}[contains(., '{1}')]".format(tag, el_text)
-        return self.__common_select__(el, xpath_query, "xpath", need_wait, captcha_occurs)
-
-    def children(self, el):
-        return el.find_elements_by_xpath("*")
-
-    def text(self, el, safe=True):
-        return el.text if el or not safe else ""
-
-    def attr(self, el, attr_name, safe=True):
-        return el.get_attribute(attr_name) if el or not safe else ""
+def __safe_execution__(func, *args):  # , need_wait=False, captcha_occurs=True
+    try:
+        return func(*args)
+    except (TimeoutException, NoSuchElementException):
+        return None
+    except Exception as e:
+        raise e
 
 
 class Provider:
