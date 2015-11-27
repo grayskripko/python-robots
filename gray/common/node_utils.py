@@ -1,4 +1,6 @@
 # from abc import ABCMeta, abstractmethod
+import re
+
 from lxml.cssselect import CSSSelector
 from lxml.html import fromstring
 import requests
@@ -8,12 +10,14 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium import webdriver
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.common.exceptions import *
-from gray.common.data_utils import clear_text, time_measure
+from gray.common.data_utils import clear_text, time_measure, get_domain, first_match, parse_number
 from gray.rear.keaboard_emulation import *
 
 
 class Node:
-    def __init__(self, el_source, provider_type=None, page_load_timeout=30, ajax_timeout=5):
+    def __init__(self, el_source, provider_type=None,
+                 dynamic_for_browser=True, waited_el_css=None,
+                 page_load_timeout=30, ajax_timeout=5):
         """
         :param provider_type: ['requests', 'chrome', 'phantomjs']
         """
@@ -27,22 +31,22 @@ class Node:
             return
 
         if node_source_type == "url":
-            start_time = time.time()
             if provider_type == Provider.REQUESTS:
                 self.timeout = page_load_timeout
             else:
                 self.browser = Browser(provider_type, page_load_timeout, ajax_timeout)
-            self.navigate(el_source)
-            time_measure("First page time", start_time)
+            self.navigate(el_source, dynamic_for_browser, waited_el_css)
         elif node_source_type == "file":
             self.el = fromstring(open(el_source, encoding="utf-8"))
         else:
             raise ValueError("node_source_type not in ['node', 'url', 'file']")
 
-    def navigate(self, url, waited_el_css=None):
+    def navigate(self, url, dynamic_for_browser=True, waited_el_css=None):
+        start_time = time.time()
         if self.browser:
             self.browser.navigate(url, waited_el_css)
-            self.el = fromstring(self.browser.driver.page_source)
+            driver = self.browser.driver
+            self.el = driver if dynamic_for_browser else fromstring(driver.page_source)
         else:
             for attempts in range(5, 0, -1):
                 try:
@@ -51,7 +55,11 @@ class Node:
                 except Exception as e:
                     print("Bad navigation attempt", e)
                     time.sleep(self.timeout << 1)
+        time_measure(url, start_time)
         return self.__create_node__(self.el)
+
+    def get_html_snapshot(self):
+        return self.__create_node__(fromstring(self.browser.driver.page_source))
 
     def wait(self, css_of_waited):
         self.browser.wait(css_of_waited)
@@ -63,22 +71,33 @@ class Node:
         self.browser.shutdown()
         self.el = None
 
-    def select_list(self, css_query, dynamic=False):
+    def select_list(self, css_query):
         if self.el is None:
-            return NodeList(self.__create_node__(None))
-        if dynamic:
+            return NodeList([self.__create_node__(None)])
+        if hasattr(self, 'browser'):
             result_els = __safe_execution__(self.el.find_elements_by_css_selector, css_query)
         else:
             selector = CSSSelector(css_query)
             result_els = __safe_execution__(selector, self.el)
         return NodeList(map(lambda el: self.__create_node__(el), result_els))
 
-    def select(self, query, dynamic=False, is_browser_css_query=True):
+    def select(self, query, is_browser_css_query=True):
         # "{0}:contains('{1}')" "//{0}[contains(., '{1}')]"
         if self.el is None:
             return self.__create_node__(None)
-        if dynamic:
-            by = By.CSS_SELECTOR if is_browser_css_query else By.XPATH
+        if hasattr(self, 'browser'):
+            if ":contains" in query:
+                # "h1:contains('job is private')""
+                possible_tag = re.sub(":contains\(.+?\)", "", query)
+                if " " not in possible_tag and "." not in possible_tag \
+                        and ":" not in possible_tag and ">" not in possible_tag:
+                    contains_text = first_match("(?<=:contains\(.)[^'\"]+", query)
+                    by = By.XPATH
+                    query = "//{0}[contains(., '{1}')]".format(possible_tag, contains_text)
+                else:
+                    raise ValueError("could not rewrite ':contains' in xpath")
+            else:
+                by = By.CSS_SELECTOR if is_browser_css_query else By.XPATH
             result_el = __safe_execution__(self.el.find_element, by, query)
         else:
             selector = CSSSelector(query)
@@ -86,10 +105,10 @@ class Node:
             result_el = result_els[0] if result_els else None
         return self.__create_node__(result_el)
 
-    def children(self, idx=None, dynamic=False):
+    def children(self, idx=None):
         if self.el is None:
-            return self.__create_node__(None) if idx else NodeList(self.__create_node__(None))
-        if dynamic:
+            return self.__create_node__(None) if idx else NodeList([self.__create_node__(None)])
+        if hasattr(self, 'browser'):
             children_els = self.el.find_elements_by_xpath("*")
         else:
             children_els = self.el.getchildren()
@@ -99,28 +118,52 @@ class Node:
             return self.__create_node__(children_els[idx]) if idx < len(children_els) else self.__create_node__(None)
         return NodeList(map(lambda el: self.__create_node__(el), children_els))
 
-    def text(self, safe=True, dynamic=False):
+    def text(self, pattern=None, safe=True):
         if safe and self.el is None:
             return ""
-        if dynamic:
-            return self.el.text
-        dirty_text = self.el.text
-        return clear_text(dirty_text)
+        text = first_match(pattern, self.el.text) if pattern else self.el.text  # coincidence of selenium and lxml
+        if hasattr(self, 'browser'):
+            return text
+        return clear_text(text)
 
-    def attr(self, attr_name, safe=True, dynamic=False):
+    def attr(self, attr_name, safe=True):
         if safe and self.el is None:
             return ""
-        if dynamic:
+        if hasattr(self, 'browser'):
             return self.el.get_attribute(attr_name)
         return self.el.get(attr_name)
 
+    def abs_url(self, url):
+        domain_url = get_domain(url)
+        if domain_url.endswith("/"):
+            raise ValueError("Url with redundant '//'")
+        href = self.attr("href")
+        if href == "":
+            raise ValueError("Href is empty")
+        if hasattr(self, 'browser'):
+            return href
+        return domain_url + href
+
+    def number(self, pattern=None, prec=0, attr_name=None):
+        if attr_name:
+            str_number = first_match(pattern, self.attr(attr_name)) if pattern else self.attr(attr_name)
+        else:
+            str_number = self.text(pattern)
+        if not str_number:
+            return None
+        return parse_number(str_number, prec)
+
+    def send_keys(self, val):
+        throw_error_if_not = self.browser
+        self.el.send_keys(val)
+
     def __create_node__(self, el):
         result_node = Node(el)
-        if self.browser:
+        if hasattr(self, 'browser'):
             result_node.browser = self.browser
         return result_node
 
-    def __nonzero__(self):
+    def __bool__(self):
         return self.el is not None
 
 
@@ -162,9 +205,8 @@ class Browser:
                 self.driver.get(url)
                 if css_of_waited:
                     self.waiter.until(lambda x: self.driver.find_element_by_css_selector(css_of_waited))
-                print(url)
+                # print(url)
                 return
-                # return self.driver
             except Exception as e:
                 print("Bad navigation attempt", e)
                 time.sleep(30)

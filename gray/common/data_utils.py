@@ -9,7 +9,8 @@ import time
 
 def first_match(pattern, string, safe=True, strip=True):
     try:
-        result = re.search(pattern, string, flags=re.MULTILINE | re.DOTALL).group(0)
+        results = re.search(pattern, string, flags=re.MULTILINE | re.DOTALL)
+        result = results.group(0) if results else ""
         return result.strip() if strip else result
     except Exception as ex:
         if safe:
@@ -26,14 +27,18 @@ def clear_text(string):
     return result
 
 
-def parse_float(string, round_precision=None, safe=True):
+def parse_number(string, round_precision=0, safe=True):
     try:
+        if "." not in string:
+            return int(string)
         parsed_float = float(string)
-        if round_precision:
-            return round(float(parsed_float), round_precision)
+        if round_precision is None:
+            return parsed_float
+        rounded_float = round(float(parsed_float), round_precision)
+        return int(rounded_float) if int(rounded_float) == rounded_float else rounded_float
     except Exception as ex:
         if safe:
-            return ""
+            return None
         else:
             raise ex
 
@@ -118,3 +123,7 @@ def send_email(body, subject="Upwork monitor", recipient="grayskripko@gmail.com"
 def time_measure(msg, start_time, precision=0):
     duration = str(round(time.time() - start_time, precision)) if precision else str(round(time.time() - start_time))
     print("{0}: [{1}] sec".format(msg, duration))
+
+
+def get_domain(url):
+    return first_match(".+?\.[^/]*", url, safe=False, strip=False)  # or .+?\..*(?=/)
