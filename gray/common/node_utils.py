@@ -1,6 +1,5 @@
 # from abc import ABCMeta, abstractmethod
 import re
-
 from lxml.cssselect import CSSSelector
 from lxml.html import fromstring
 import requests
@@ -89,11 +88,12 @@ class Node:
             if ":contains" in query:
                 # "h1:contains('job is private')""
                 possible_tag = re.sub(":contains\(.+?\)", "", query)
-                if " " not in possible_tag and "." not in possible_tag \
-                        and ":" not in possible_tag and ">" not in possible_tag:
+                if " " not in possible_tag and ":" not in possible_tag and ">" not in possible_tag:
                     contains_text = first_match("(?<=:contains\(.)[^'\"]+", query)
                     by = By.XPATH
-                    query = "//{0}[contains(., '{1}')]".format(possible_tag, contains_text)
+                    query = "//*[@class='{0}' and contains(., '{1}')]".format(possible_tag, contains_text) \
+                        if "." in possible_tag \
+                        else "//{0}[contains(., '{1}')]".format(possible_tag, contains_text)
                 else:
                     raise ValueError("could not rewrite ':contains' in xpath")
             else:
@@ -144,14 +144,19 @@ class Node:
             return href
         return domain_url + href
 
-    def number(self, pattern=None, prec=0, attr_name=None):
+    def number(self, pattern=None, prec=0, default=None, attr_name=None):
         if attr_name:
             str_number = first_match(pattern, self.attr(attr_name)) if pattern else self.attr(attr_name)
         else:
             str_number = self.text(pattern)
         if not str_number:
-            return None
-        return parse_number(str_number, prec)
+            return default
+        return parse_number(str_number, prec, default)
+
+    def html(self):
+        if hasattr(self, 'browser'):
+            return self.el.get_attribute("outerHTML")
+        return self.el.html
 
     def send_keys(self, val):
         throw_error_if_not = self.browser

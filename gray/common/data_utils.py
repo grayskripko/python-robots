@@ -27,7 +27,7 @@ def clear_text(string):
     return result
 
 
-def parse_number(string, round_precision=0, safe=True):
+def parse_number(string, round_precision=0, default=None, safe=True):
     try:
         if "." not in string:
             return int(string)
@@ -38,9 +38,13 @@ def parse_number(string, round_precision=0, safe=True):
         return int(rounded_float) if int(rounded_float) == rounded_float else rounded_float
     except Exception as ex:
         if safe:
-            return None
+            return default
         else:
             raise ex
+
+
+def contains_url(string):
+    return first_match("(?i)\Wcom\W|http|www", string) != ""
 
 
 def inline_print(string, sep=" "):
@@ -58,6 +62,10 @@ def inline_print(string, sep=" "):
 #         dict_writer.writerows(dict_list)
 
 
+def generate_full_file_name(file_name):
+    return os.getenv("OUT") + file_name + ("" if "." in file_name else ".csv")
+
+
 def write_entries(dict_list, file_name, id_column=None):
     if not dict_list:
         print("Empty dict_list")
@@ -67,40 +75,21 @@ def write_entries(dict_list, file_name, id_column=None):
     if id_column:
         df.index = df[id_column]
 
-    full_file_name = os.getenv("OUT") + file_name + ("" if "." in file_name else ".csv")
+    full_file_name = generate_full_file_name(file_name)
     df.to_csv(full_file_name)
     df.to_excel(re.sub("\.csv", ".xlsx", full_file_name))
-    # predicted_df = pd.DataFrame(Y_pred, index=np.arange(1, X_pred.shape[0] + 1), columns=["too_much"])
-    # predicted_df.to_csv(_data_path + file_name, index_label="id")
 
-    # if col_names is None:
-    #     col_names = dict_list[0].keys()
-    # dict_list = [{k: re.sub("\r?\n", "|| ", str(v)) for k, v in dict.items()} for dict in dict_list]
-    # file_name = str(file_name) if not isinstance(file_name, str) else file_name
-    # if not file_name.endswith(".csv"):
-    #     if "." in file_name:
-    #         file_name = input("Bad file_name for saving as csv file. Type new: ")
-    #     else:
-    #         file_name += ".csv"
-    #
-    # __write_entries__(dict_list, file_name, col_names)
-    #
-    # if len(dict_list) > 50000:
-    #     answer = input("len(dict_list) = [{}]. Press [1] for skipping searching of duplicates:".format(len(dict_list)))
-    #     if answer == "1":
-    #         return
-    #     answer = input("Are you sure? [Press 1 for skipping]:")
-    #     if answer == "1":
-    #         return
-    #
-    # dict_list_wo_duplicates = []
-    # for dict_el in dict_list:
-    #     if dict_el not in dict_list_wo_duplicates:
-    #         dict_list_wo_duplicates.append(dict_el)
-    #
-    # if len(dict_list) != len(dict_list_wo_duplicates):
-    #     print("\ncount of duplicates: " + str(len(dict_list) - len(dict_list_wo_duplicates)))
-    #     __write_entries__(dict_list_wo_duplicates, "no_duplicates_" + file_name, col_names)
+
+def write_list(lst, file_name):
+    full_file_name = generate_full_file_name(file_name)
+    pd.DataFrame(lst).to_csv(full_file_name, index=False, header=False)
+
+
+def read_list(file_name):
+    full_file_name = generate_full_file_name(file_name)
+    if not os.path.exists(full_file_name):
+        return []
+    return pd.read_csv(full_file_name, header=None)[0].tolist()
 
 
 def send_email(body, subject="Upwork monitor", recipient="grayskripko@gmail.com"):
