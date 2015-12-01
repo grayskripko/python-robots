@@ -80,9 +80,13 @@ def write_entries(dict_list, file_name, id_column=None):
     df.to_excel(re.sub("\.csv", ".xlsx", full_file_name))
 
 
-def write_list(lst, file_name):
+def write_list(lst, file_name, append=False):
     full_file_name = generate_full_file_name(file_name)
-    pd.DataFrame(lst).to_csv(full_file_name, index=False, header=False)
+    if append:
+        with open(full_file_name, 'a') as stream:
+            pd.DataFrame(lst).to_csv(stream, index=False, header=False)
+    else:
+        pd.DataFrame(lst).to_csv(full_file_name, index=False, header=False)
 
 
 def read_list(file_name):

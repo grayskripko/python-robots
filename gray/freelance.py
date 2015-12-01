@@ -1,10 +1,11 @@
 import os
 import time
 import upwork
-from gray.common.data_utils import first_match, send_email, parse_number, contains_url, read_list
+from gray.common.data_utils import first_match, send_email, parse_number, contains_url, read_list, write_list
 from gray.common.node_utils import Node, Provider
 
 upwork_job_feed_url = "https://www.upwork.com/find-work-home/"
+prev_attractive_file_name = "upwork/prev_attractive.csv"
 delay_between_job_feed_refresh_sec = 30
 delay_between_requests_sec = 2
 stop_skills = ["Internet research", "WordPress", "Telephone Handling"]
@@ -29,7 +30,7 @@ def is_attractive_job(job):
     attractive_competitiveness = job["proposals"] < 10 and job["interviewing"] < 3
     if not attractive_competitiveness:
         return False
-    # attractive_job_desc = contains_url(job["desc"])
+    # attractive_job_desc = contains_url(job["desc"])  # data science jobs, visualization
     return True
 
 
@@ -82,7 +83,8 @@ def process_job(doc, job_link):
         if stars_review_popover_el else None
     job["stars_reviewers"] = stars_review_popover_el.number(pattern="(?<=based on )\d+", attr_name="popover") \
         if stars_review_popover_el else None
-    job["company_since"] = about_company.select(".o-support-info:contains('Since')").text()  ##################################################
+    job["company_since"] = about_company.select(".o-support-info:contains('Since')").text("Member Since ", is_replacement=True)
+    job["company_avg_hourly"] = about_company.select("strong:contains('Avg Hourly')").number("(?<=\$)\d+")
 
     posted_ago_str = job_left_col_el.select("*:nth-child(2)").text()
     if "day" in posted_ago_str:
@@ -105,17 +107,17 @@ def process_job(doc, job_link):
 
     job_details_el = job_left_col_el.select(":nth-child(4)").children()
     job["desc"] = job_details_el[0].select("p.break").text()
-    job["skills"] = job_details_el[0].select("#form span").text()
+    job["skills"] = job_details_el[0].select_list("#form a").texts()
 
     job_activity_el = job_details_el[-1]
     job["last_viewed"] = job_activity_el.select("p:contains('Last Viewed')").children(1).text()
     job["proposals"] = job_activity_el.select("p:contains('Proposals')").children(1).number()
     job["interviewing"] = job_activity_el.select("p:contains('Interviewing')").number("(?<=Interviewing: )\d+")
-    print(job)
+    print("\n", job)
     return job
 
 
-def actualize_viewed_jobs(viewed_jobs):
+def remove_old_viewed_jobs(viewed_jobs):
     hours_for_marking_expired = 6
     actualization_time_barrier = time.time() - hours_for_marking_expired * 60 * 60
     return list(filter(lambda job: job["posted_time"] > actualization_time_barrier, viewed_jobs))
@@ -126,14 +128,14 @@ def send_email_with_attractive_jobs(attractive_jobs):
     send_email(msg)
 
 
-def process_job_feed_list(viewed_jobs):
+def process_job_feed_list(viewed_jobs, prev_attractive_job_urls):
     viewed_job_links = list(map(lambda job: job["url"], viewed_jobs))
     attractive_jobs = []
     job_links = list(map(lambda node: node.abs_url(upwork_job_feed_url),
                          doc.select_list("#jsJobResults .oVisitedLink")))
     for job_link in job_links:
-        if job_link in viewed_job_links:
-            continue
+        if job_link in viewed_job_links or job_link in prev_attractive_job_urls:
+            continue  ##################################################################### second iteration will not drop viewed_jobs
         doc.navigate(job_link)
         new_job = process_job(doc, job_link)
         viewed_jobs.append(new_job)
@@ -143,21 +145,23 @@ def process_job_feed_list(viewed_jobs):
 
     if attractive_jobs:
         send_email_with_attractive_jobs(attractive_jobs)
+        write_list(list(map(lambda job: job["url"], attractive_jobs)), prev_attractive_file_name, append=True)
     return viewed_jobs
 
 
 doc = get_upwork_job_feed_doc()
-prev_attractive_jobs = read_list("")
+prev_attractive_job_urls = read_list(prev_attractive_file_name)
 viewed_jobs = []
 i = 0
 while True:
-    viewed_jobs = actualize_viewed_jobs(viewed_jobs)
+    viewed_jobs = remove_old_viewed_jobs(viewed_jobs)
     len_viewed_jobs = len(viewed_jobs)
-    viewed_jobs = process_job_feed_list(viewed_jobs)
+    viewed_jobs = process_job_feed_list(viewed_jobs, prev_attractive_job_urls)
     if len(viewed_jobs) != len_viewed_jobs:
-        print(i, len_viewed_jobs, len(viewed_jobs))
+        print("Monitoring iteration [{0}], changing in len(viewed_jobs): [{1}]".format(i, len(viewed_jobs) - len_viewed_jobs))
     time.sleep(delay_between_job_feed_refresh_sec)
     doc.navigate(upwork_job_feed_url)
+    i += 1
 
 # write_entries(jobs_list_dict, "jobs.csv")
 print("end")

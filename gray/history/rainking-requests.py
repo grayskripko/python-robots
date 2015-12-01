@@ -4,7 +4,7 @@ import os
 import time
 
 from gray.common.bs4_utils import Node
-from gray.common.data_utils import inline_print, first_match, write_entries
+from gray.common.data_utils import first_match, write_entries
 
 rainking_out_path = os.getenv("OUT") + "rainking\\"  # path to saved html pages
 

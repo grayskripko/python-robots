@@ -91,9 +91,12 @@ class Node:
                 if " " not in possible_tag and ":" not in possible_tag and ">" not in possible_tag:
                     contains_text = first_match("(?<=:contains\(.)[^'\"]+", query)
                     by = By.XPATH
-                    query = "//*[@class='{0}' and contains(., '{1}')]".format(possible_tag, contains_text) \
-                        if "." in possible_tag \
-                        else "//{0}[contains(., '{1}')]".format(possible_tag, contains_text)
+                    if possible_tag.startswith("."):
+                        query = "//*[@class='{0}' and contains(., '{1}')]".format(possible_tag[1:], contains_text)
+                    elif "." not in possible_tag:
+                        query = "//{0}[contains(., '{1}')]".format(possible_tag, contains_text)
+                    else:
+                        raise ValueError("could not rewrite ':contains' in xpath")
                 else:
                     raise ValueError("could not rewrite ':contains' in xpath")
             else:
@@ -118,10 +121,13 @@ class Node:
             return self.__create_node__(children_els[idx]) if idx < len(children_els) else self.__create_node__(None)
         return NodeList(map(lambda el: self.__create_node__(el), children_els))
 
-    def text(self, pattern=None, safe=True):
+    def text(self, pattern=None, is_replacement=False, safe=True):
         if safe and self.el is None:
             return ""
-        text = first_match(pattern, self.el.text) if pattern else self.el.text  # coincidence of selenium and lxml
+        if pattern:
+            text = re.sub(pattern, "", self.el.text) if is_replacement else first_match(pattern, self.el.text)
+        else:
+            text = self.el.text  # coincidence of selenium and lxml
         if hasattr(self, 'browser'):
             return text
         return clear_text(text)
