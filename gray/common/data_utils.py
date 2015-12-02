@@ -3,6 +3,7 @@ import os
 import re
 import sys
 import smtplib
+from dateutil.parser import parse
 
 import time
 
@@ -43,6 +44,10 @@ def parse_number(string, round_precision=0, default=None, safe=True):
             raise ex
 
 
+def parse_date(string):
+    return parse(string)
+
+
 def contains_url(string):
     return first_match("(?i)\Wcom\W|http|www", string) != ""
 
@@ -52,14 +57,6 @@ def inline_print(string, sep=" "):
         string = str(string)
     print(string, end=sep)
     sys.stdout.flush()
-
-
-# def __write_entries__(dict_list, file_name, col_names, new_line_alt="|| "):
-#     with open(os.environ['OUT'] + file_name, 'w', newline='', encoding='utf-8') as stream:
-#         dict_writer = csv.DictWriter(stream, col_names)
-#         dict_writer.writeheader()
-#         # dict_writer.writerow({k: v.encode('utf8') for k, v in dict_list.items()})
-#         dict_writer.writerows(dict_list)
 
 
 def generate_full_file_name(file_name):
@@ -91,7 +88,7 @@ def write_list(lst, file_name, append=False):
 
 def read_list(file_name):
     full_file_name = generate_full_file_name(file_name)
-    if not os.path.exists(full_file_name):
+    if not os.path.exists(full_file_name) or os.stat(full_file_name).st_size == 0:
         return []
     return pd.read_csv(full_file_name, header=None)[0].tolist()
 

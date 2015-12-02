@@ -1,7 +1,8 @@
 import os
 import time
 import upwork
-from gray.common.data_utils import first_match, send_email, parse_number, contains_url, read_list, write_list
+from gray.common.data_utils import first_match, send_email, parse_number, contains_url, read_list, write_list, \
+    parse_date
 from gray.common.node_utils import Node, Provider
 
 upwork_job_feed_url = "https://www.upwork.com/find-work-home/"
@@ -11,110 +12,12 @@ delay_between_requests_sec = 2
 stop_skills = ["Internet research", "WordPress", "Telephone Handling"]
 
 
-def is_attractive_job(job):
-    for stop_skill in stop_skills:
-        if stop_skill in job["skills"]:
-            return False
-    if job["stars"] and job["stars"] < 4.6:
-        return False
-
-    very_attractive = (job["budget"] and job["budget"] > 200) \
-                      or (job["is_hourly"] and "Entry" not in job["budget_level"])
-    if very_attractive:
-        return True
-
-    attractive_payment = "Entry" not in job["budget_level"] and \
-        job["is_hourly"] or (job["budget"] and job["budget"] > 50)
-    if not attractive_payment:
-        return False
-    attractive_competitiveness = job["proposals"] < 10 and job["interviewing"] < 3
-    if not attractive_competitiveness:
-        return False
-    # attractive_job_desc = contains_url(job["desc"])  # data science jobs, visualization
-    return True
-
-
-def get_api_token():
-    client = upwork.Client(os.environ["upkey"], os.environ["upsecret"])
-    authorize_url = client.auth.get_authorize_url()
-    doc = Node(authorize_url, "url", "chrome")
-    print("Navigating authorize url...")
-    doc.select("#login_username").send_keys("grayskripko@gmail.com")
-    doc.select("#login_password").send_keys(os.getenv("up") + "#u")
-    doc.select("#layout form").submit()
-
-    print("Navigating token url...")
-    verifier_el = doc.select("#main > div")
-    verifier = first_match("(?<=oauth_verifier=).+", verifier_el.text)
-
-    oauth_token, oauth_token_secret = client.auth.get_token(verifier)
-    oauth_token = oauth_token.decode("utf-8")
-    oauth_token_secret = oauth_token_secret.decode("utf-8")
-    print(oauth_token, oauth_token_secret)
-    return oauth_token, oauth_token_secret
-    # client = upwork.Client(os.environ["upkey"], os.environ["upsecret"], os.getenv("uptoken"), os.getenv("uptokensecret"))
-    # jobs_list_dict = client.provider_v2.search_jobs(data={'skills': ["mining", "scraping", " crawler", " scrapy"],
-
-
 def get_upwork_job_feed_doc():
     doc = Node(upwork_job_feed_url, Provider.PHANTOMJS)
     doc.select("#login_username").send_keys("grayskripko@gmail.com")
     doc.select("#login_password").send_keys(os.getenv("up") + "#u")
     doc.select("#layout > div.container.ng-scope > div > form").el.submit()
     return doc
-
-
-def process_job(doc, job_link):
-    job = {}
-    job["url"] = job_link
-    if doc.select("h1:contains('job is private')"):
-        job["is_public"] = False
-        return job
-    else:
-        job["is_public"] = True
-
-    job_title_el = doc.select("#layout > .container.ng-scope > .row")
-    job_left_col_el = doc.select("#layout > .container.ng-scope > .row:last-child > .col-md-9")
-    about_company = doc.select("#layout > .container.ng-scope > .row:last-child > .col-md-3")
-
-    job["title"] = job_title_el.select("h1").text()
-    stars_review_popover_el = about_company.select("p:contains('review')").select("*[popover]")
-    job["stars"] = stars_review_popover_el.number(pattern="[\d\.]+(?= stars?)", prec=2, attr_name="popover") \
-        if stars_review_popover_el else None
-    job["stars_reviewers"] = stars_review_popover_el.number(pattern="(?<=based on )\d+", attr_name="popover") \
-        if stars_review_popover_el else None
-    job["company_since"] = about_company.select(".o-support-info:contains('Since')").text("Member Since ", is_replacement=True)
-    job["company_avg_hourly"] = about_company.select("strong:contains('Avg Hourly')").number("(?<=\$)\d+")
-
-    posted_ago_str = job_left_col_el.select("*:nth-child(2)").text()
-    if "day" in posted_ago_str:
-        sec_time_shift = 24 * 60 * 60
-    elif "hour" in posted_ago_str:
-        sec_time_shift = parse_number(first_match("\d+", posted_ago_str), default=1) * 60 * 60
-    elif "minute" in posted_ago_str:
-        sec_time_shift = parse_number(first_match("\d+", posted_ago_str), default=1) * 60
-    else:
-        print("Rear posted_ago_str value:", posted_ago_str)
-        sec_time_shift = 0
-    job["posted_time"] = time.time() - sec_time_shift
-
-    price_cell_els = job_left_col_el.select(":nth-child(3)").children()
-    job["is_hourly"] = price_cell_els[0].select("strong").text() == "Hourly Job"
-
-    job["budget"] = price_cell_els[1].select("strong").number(pattern="(?=\$)\d+") \
-        if len(price_cell_els) == 3 else None
-    job["budget_level"] = price_cell_els[-1].select("strong").text(pattern="\w+(?= Level)")
-
-    job_details_el = job_left_col_el.select(":nth-child(4)").children()
-    job["desc"] = job_details_el[0].select("p.break").text()
-    job["skills"] = job_details_el[0].select_list("#form a").texts()
-
-    job_activity_el = job_details_el[-1]
-    job["last_viewed"] = job_activity_el.select("p:contains('Last Viewed')").children(1).text()
-    job["proposals"] = job_activity_el.select("p:contains('Proposals')").children(1).number()
-    job["interviewing"] = job_activity_el.select("p:contains('Interviewing')").number("(?<=Interviewing: )\d+")
-    print("\n", job)
-    return job
 
 
 def remove_old_viewed_jobs(viewed_jobs):
@@ -128,40 +31,115 @@ def send_email_with_attractive_jobs(attractive_jobs):
     send_email(msg)
 
 
-def process_job_feed_list(viewed_jobs, prev_attractive_job_urls):
-    viewed_job_links = list(map(lambda job: job["url"], viewed_jobs))
+def fill_shallow_job(doc, job):
+    if doc.select("h1:contains('job is private')"):
+        job["is_public"] = False
+        return job
+    else:
+        job["is_public"] = True
+        job["is_shallow"] = False
+
+    job_left_col_el = doc.select("#layout > .container.ng-scope > .row:last-child > .col-md-9")
+    job_activity_el = job_left_col_el.select(":nth-child(4)").children()[-1]
+    job["last_viewed"] = job_activity_el.select("p:contains('Last Viewed')").children(1).text()
+    job["proposals"] = job_activity_el.select("p:contains('Proposals')").children(1).number()
+    job["interviewing"] = job_activity_el.select("p:contains('Interviewing')").number("(?<=Interviewing: )\d+")
+    print("\n", job)
+    return job
+
+
+def get_shallow_jobs(doc, viewed_job_urls):
+    shallow_job_els = doc.select_list("#jsJobResults > article.oMed")
+    shallow_jobs = []
+    for shallow_job_el in shallow_job_els:
+        job = {}
+        title_el = shallow_job_el.select("h1 > a")
+        job["url"] = title_el.abs_url(upwork_job_feed_url)
+        if job["url"] in viewed_job_urls:
+            continue
+        job["title"] = title_el.text()
+
+        price_el = shallow_job_el.select(".oSupportInfo")
+        job["is_hourly"] = price_el.select("strong").text() == "Hourly"
+        job["budget_level"] = price_el.select("#jsTier").text("\S+")
+        job["budget"] = price_el.select(".jsBudget").number("(?<=\$)\d+")
+        job["time_posted"] = price_el.select(".jsAutoRelativeTime").date(False, "\d+", "data-timestamp")
+
+        hidden_desc_el = shallow_job_el.select(".oDescription > .jsFull")
+        job["desc"] = hidden_desc_el.text() if hidden_desc_el.text() else shallow_job_el.select(".oDescription").text()
+
+        job["company_since"] = shallow_job_el.select(".oSpendIcon").date(True, "(?<=Member Since )\S+", "title")
+        job["stars"] = shallow_job_el.select(".oStarsContainer").number(pattern="\S+(?= star)", attr_name="data-content")
+        job["skills"] = shallow_job_el.select_list(".oSkills > a").texts()
+        shallow_jobs.append(job)
+    return shallow_jobs
+
+
+def process_job_feed_list(doc, viewed_job_urls):
     attractive_jobs = []
-    job_links = list(map(lambda node: node.abs_url(upwork_job_feed_url),
-                         doc.select_list("#jsJobResults .oVisitedLink")))
-    for job_link in job_links:
-        if job_link in viewed_job_links or job_link in prev_attractive_job_urls:
-            continue  ##################################################################### second iteration will not drop viewed_jobs
-        doc.navigate(job_link)
-        new_job = process_job(doc, job_link)
-        viewed_jobs.append(new_job)
-        if is_attractive_job(new_job):
-            attractive_jobs.append(new_job)
+    shallow_jobs = get_shallow_jobs(doc, viewed_job_urls)
+    new_shallow_jobs = []
+
+    for shallow_job in shallow_jobs:
+        if shallow_job["url"] in viewed_job_urls:
+            continue
+        new_shallow_jobs.append(shallow_job)
+        if not is_attractive_job(shallow_job, is_shallow=True):
+            continue
+        doc.navigate(shallow_job["url"])
+        new_filled_job = fill_shallow_job(doc, shallow_job)
+        if is_attractive_job(new_filled_job, is_shallow=False):
+            attractive_jobs.append(new_filled_job)
         time.sleep(delay_between_requests_sec)
 
     if attractive_jobs:
         send_email_with_attractive_jobs(attractive_jobs)
         write_list(list(map(lambda job: job["url"], attractive_jobs)), prev_attractive_file_name, append=True)
-    return viewed_jobs
+    return new_shallow_jobs
 
 
-doc = get_upwork_job_feed_doc()
-prev_attractive_job_urls = read_list(prev_attractive_file_name)
-viewed_jobs = []
-i = 0
-while True:
-    viewed_jobs = remove_old_viewed_jobs(viewed_jobs)
-    len_viewed_jobs = len(viewed_jobs)
-    viewed_jobs = process_job_feed_list(viewed_jobs, prev_attractive_job_urls)
-    if len(viewed_jobs) != len_viewed_jobs:
-        print("Monitoring iteration [{0}], changing in len(viewed_jobs): [{1}]".format(i, len(viewed_jobs) - len_viewed_jobs))
-    time.sleep(delay_between_job_feed_refresh_sec)
-    doc.navigate(upwork_job_feed_url)
-    i += 1
+def is_attractive_job(job, is_shallow):
+    if is_shallow:
+        for stop_skill in stop_skills:
+            if stop_skill in job["skills"]:
+                print(job["url"], "is_shallow for stop_skill:", stop_skill)
+                return False
+        if job["stars"] and job["stars"] < 4.5:
+            print(job["url"], "is_shallow for low stars:", job["stars"])
+            return False
+        is_attractive_payment = "Entry" not in job["budget_level"] and \
+            job["is_hourly"] or (job["budget"] and job["budget"] > 50)
+        if not is_attractive_payment:
+            print(job["url"], "is_shallow for low payment")
+        return is_attractive_payment
 
-# write_entries(jobs_list_dict, "jobs.csv")
-print("end")
+    is_very_attractive_payment = (job["budget"] and job["budget"] >= 200) \
+                      or (job["is_hourly"] and "Entry" not in job["budget_level"])
+    is_attractive_competitiveness = job["proposals"] < 10 and job["interviewing"] < 3
+    if is_very_attractive_payment or is_attractive_competitiveness:
+        if is_very_attractive_payment:
+            print(job["url"], "selected for very_attractive_payment")
+        else:
+            print(job["url"], "selected for attractive_competitiveness")
+    return is_very_attractive_payment or is_attractive_competitiveness
+
+
+def main():
+    doc = get_upwork_job_feed_doc()
+    prev_attractive_job_urls = read_list(prev_attractive_file_name)
+    viewed_jobs = list(map(lambda job_url: {"url": job_url, "is_prev_attractive": True}, prev_attractive_job_urls))
+    i = 0
+
+    while True:
+        view_job_urls = list(map(lambda job: job["url"], viewed_jobs))
+        viewed_jobs += process_job_feed_list(doc, view_job_urls)
+        print("Monitoring iteration: [{0}], len(viewed_jobs): [{1}]".format(i, len(viewed_jobs)))
+        time.sleep(delay_between_job_feed_refresh_sec)
+        doc.navigate(upwork_job_feed_url)
+        i += 1
+    # write_entries(jobs_list_dict, "jobs.csv")
+    print("end")
+
+
+if __name__ == '__main__':
+    main()

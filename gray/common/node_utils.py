@@ -9,7 +9,7 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium import webdriver
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.common.exceptions import *
-from gray.common.data_utils import clear_text, time_measure, get_domain, first_match, parse_number
+from gray.common.data_utils import clear_text, time_measure, get_domain, first_match, parse_number, parse_date
 from gray.rear.keaboard_emulation import *
 
 
@@ -40,7 +40,7 @@ class Node:
         else:
             raise ValueError("node_source_type not in ['node', 'url', 'file']")
 
-    def navigate(self, url, dynamic_for_browser=True, waited_el_css=None):
+    def navigate(self, url, dynamic_for_browser=True, waited_el_css=None, need_time_measure=False):
         start_time = time.time()
         if self.browser:
             self.browser.navigate(url, waited_el_css)
@@ -54,7 +54,8 @@ class Node:
                 except Exception as e:
                     print("Bad navigation attempt", e)
                     time.sleep(self.timeout << 1)
-        time_measure(url, start_time)
+        if need_time_measure:
+            time_measure(url, start_time)
         return self.__create_node__(self.el)
 
     def get_html_snapshot(self):
@@ -111,10 +112,7 @@ class Node:
     def children(self, idx=None):
         if self.el is None:
             return self.__create_node__(None) if idx else NodeList([self.__create_node__(None)])
-        if hasattr(self, 'browser'):
-            children_els = self.el.find_elements_by_xpath("*")
-        else:
-            children_els = self.el.getchildren()
+        children_els = self.el.find_elements_by_xpath("*") if hasattr(self, 'browser') else self.el.getchildren()
         if not children_els:
             return self.__create_node__(None)
         if idx:
@@ -122,15 +120,13 @@ class Node:
         return NodeList(map(lambda el: self.__create_node__(el), children_els))
 
     def text(self, pattern=None, is_replacement=False, safe=True):
-        if safe and self.el is None:
+        if self.el is None and safe:
             return ""
         if pattern:
             text = re.sub(pattern, "", self.el.text) if is_replacement else first_match(pattern, self.el.text)
         else:
             text = self.el.text  # coincidence of selenium and lxml
-        if hasattr(self, 'browser'):
-            return text
-        return clear_text(text)
+        return text if hasattr(self, 'browser') else clear_text(text)
 
     def attr(self, attr_name, safe=True):
         if safe and self.el is None:
@@ -140,24 +136,31 @@ class Node:
         return self.el.get(attr_name)
 
     def abs_url(self, url):
-        domain_url = get_domain(url)
-        if domain_url.endswith("/"):
-            raise ValueError("Url with redundant '//'")
         href = self.attr("href")
         if href == "":
             raise ValueError("Href is empty")
         if hasattr(self, 'browser'):
             return href
+        domain_url = get_domain(url)
+        if domain_url.endswith("/"):
+            raise ValueError("Url with redundant '//'")
         return domain_url + href
 
-    def number(self, pattern=None, prec=0, default=None, attr_name=None):
+    def number(self, pattern=None, prec=0, attr_name=None):
+        if attr_name:
+            str_number = first_match(pattern, self.attr(attr_name)) if pattern else self.attr(attr_name)
+        else:
+            str_number = self.text(pattern)
+        return parse_number(str_number, prec) if str_number else None
+
+    def date(self, need_parse=True, pattern=None, attr_name=None):
         if attr_name:
             str_number = first_match(pattern, self.attr(attr_name)) if pattern else self.attr(attr_name)
         else:
             str_number = self.text(pattern)
         if not str_number:
-            return default
-        return parse_number(str_number, prec, default)
+            return None
+        return parse_date(str_number) if need_parse else time.gmtime(parse_number(str_number))
 
     def html(self):
         if hasattr(self, 'browser'):
@@ -216,7 +219,6 @@ class Browser:
                 self.driver.get(url)
                 if css_of_waited:
                     self.waiter.until(lambda x: self.driver.find_element_by_css_selector(css_of_waited))
-                # print(url)
                 return
             except Exception as e:
                 print("Bad navigation attempt", e)
