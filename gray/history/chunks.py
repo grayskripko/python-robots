@@ -11,7 +11,7 @@ def get_api_token():
     authorize_url = client.auth.get_authorize_url()
     doc = Node(authorize_url, "url", "chrome")
     print("Navigating authorize url...")
-    doc.select("#login_username").send_keys("grayskripko@gmail.com")
+    doc.select("#login_username").send_keys(os.getenv("email"))
     doc.select("#login_password").send_keys(os.getenv("up") + "#u")
     doc.select("#layout form").submit()
 
@@ -26,4 +26,3 @@ def get_api_token():
     return oauth_token, oauth_token_secret
     # client = upwork.Client(os.environ["upkey"], os.environ["upsecret"], os.getenv("uptoken"), os.getenv("uptokensecret"))
     # jobs_list_dict = client.provider_v2.search_jobs(data={'skills': ["mining", "scraping", " crawler", " scrapy"],
-

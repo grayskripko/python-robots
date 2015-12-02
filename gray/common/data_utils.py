@@ -93,18 +93,18 @@ def read_list(file_name):
     return pd.read_csv(full_file_name, header=None)[0].tolist()
 
 
-def send_email(body, subject="Upwork monitor", recipient="grayskripko@gmail.com"):
-    gmail_user = "grayskripko@gmail.com"
+def send_email(body, subject="Upwork monitor", recipient=os.getenv("email")):
+    gmail_user = os.getenv("email")
     gmail_pwd = os.getenv("up") + "#g"
     TO = recipient if type(recipient) is list else [recipient]
-    message = """\From: %s\nTo: %s\nSubject: %s\n\n%s""" % ("grayskripko@gmail.com", ", ".join(TO), subject, body)
+    message = """\From: %s\nTo: %s\nSubject: %s\n\n%s""" % (os.getenv("email"), ", ".join(TO), subject, body)
 
     try:
         server = smtplib.SMTP("smtp.gmail.com", 587)
         server.ehlo()
         server.starttls()
         server.login(gmail_user, gmail_pwd)
-        server.sendmail("grayskripko@gmail.com", TO, message)
+        server.sendmail(os.getenv("email"), TO, message)
         server.close()
     except:
         print("failed to send mail")

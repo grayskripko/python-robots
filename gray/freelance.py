@@ -1,8 +1,6 @@
 import os
 import time
-import upwork
-from gray.common.data_utils import first_match, send_email, parse_number, contains_url, read_list, write_list, \
-    parse_date
+from gray.common.data_utils import send_email, read_list, write_list
 from gray.common.node_utils import Node, Provider
 
 upwork_job_feed_url = "https://www.upwork.com/find-work-home/"
@@ -14,7 +12,7 @@ stop_skills = ["Internet research", "WordPress", "Telephone Handling"]
 
 def get_upwork_job_feed_doc():
     doc = Node(upwork_job_feed_url, Provider.PHANTOMJS)
-    doc.select("#login_username").send_keys("grayskripko@gmail.com")
+    doc.select("#login_username").send_keys(os.getenv("email"))
     doc.select("#login_password").send_keys(os.getenv("up") + "#u")
     doc.select("#layout > div.container.ng-scope > div > form").el.submit()
     return doc
@@ -27,7 +25,9 @@ def remove_old_viewed_jobs(viewed_jobs):
 
 
 def send_email_with_attractive_jobs(attractive_jobs):
-    msg = "\n".join(list(map(lambda job: str(job["budget"]) + " " + job["url"], attractive_jobs)))
+    msg = "\n".join(list(map(lambda job: "| ".join("$" + [str(job["budget"]),
+                                                          str(job["proposals"]), str(job["interviewing"]),
+                                                          job["url"]]), attractive_jobs)))
     send_email(msg)
 
 
@@ -69,7 +69,8 @@ def get_shallow_jobs(doc, viewed_job_urls):
         job["desc"] = hidden_desc_el.text() if hidden_desc_el.text() else shallow_job_el.select(".oDescription").text()
 
         job["company_since"] = shallow_job_el.select(".oSpendIcon").date(True, "(?<=Member Since )\S+", "title")
-        job["stars"] = shallow_job_el.select(".oStarsContainer").number(pattern="\S+(?= star)", attr_name="data-content")
+        job["stars"] = shallow_job_el.select(".oStarsContainer").number(pattern="\S+(?= star)",
+                                                                        attr_name="data-content")
         job["skills"] = shallow_job_el.select_list(".oSkills > a").texts()
         shallow_jobs.append(job)
     return shallow_jobs
@@ -108,13 +109,13 @@ def is_attractive_job(job, is_shallow):
             print(job["url"], "is_shallow for low stars:", job["stars"])
             return False
         is_attractive_payment = "Entry" not in job["budget_level"] and \
-            job["is_hourly"] or (job["budget"] and job["budget"] > 50)
+                                job["is_hourly"] or (job["budget"] and job["budget"] > 50)
         if not is_attractive_payment:
             print(job["url"], "is_shallow for low payment")
         return is_attractive_payment
 
     is_very_attractive_payment = (job["budget"] and job["budget"] >= 200) \
-                      or (job["is_hourly"] and "Entry" not in job["budget_level"])
+                                 or (job["is_hourly"] and "Entry" not in job["budget_level"])
     is_attractive_competitiveness = job["proposals"] < 10 and job["interviewing"] < 3
     if is_very_attractive_payment or is_attractive_competitiveness:
         if is_very_attractive_payment:
@@ -133,7 +134,7 @@ def main():
     while True:
         view_job_urls = list(map(lambda job: job["url"], viewed_jobs))
         viewed_jobs += process_job_feed_list(doc, view_job_urls)
-        print("Monitoring iteration: [{0}], len(viewed_jobs): [{1}]".format(i, len(viewed_jobs)))
+        print("iteration: [{0}], len(viewed_jobs): [{1}]".format(i, len(viewed_jobs)))
         time.sleep(delay_between_job_feed_refresh_sec)
         doc.navigate(upwork_job_feed_url)
         i += 1
